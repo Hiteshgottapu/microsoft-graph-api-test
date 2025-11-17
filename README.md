@@ -27,6 +27,106 @@ The Resume Parser module allows you to:
 - ✅ Phone Number
 - ✅ Technical Skills (Python, SQL, ML, Cloud, etc.)
 - ✅ Years of Experience
+
+- - ✅ Education (B.Tech, M.Tech, MBA, PhD, etc.)
+- ✅ Raw Text Preview
+
+## 💻 Installation
+
+### 1. Clone the repository:
+```bash
+git clone https://github.com/Hiteshgottapu/microsoft-graph-api-test.git
+cd microsoft-graph-api-test
+```
+
+### 2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Set up Azure AD App Registration:
+
+1. Go to [Azure Portal](https://portal.azure.com)
+2. Navigate to **Azure Active Directory** > **App registrations** > **New registration**
+3. Configure:
+   - **Name**: Your app name
+   - **Supported account types**: Accounts in any organizational directory
+   - **Redirect URI**: `http://localhost:5000/callback`
+4. After registration:
+   - Copy **Application (client) ID**
+   - Copy **Directory (tenant) ID**
+   - Create a **Client Secret** in "Certificates & secrets"
+5. Add API permissions:
+   - Microsoft Graph: `User.Read`, `Mail.Read`, `Files.Read.All`, `Sites.Read.All`
+   - Grant admin consent
+
+### 4. Configure environment variables:
+
+Create a `.env` file or set environment variables:
+```bash
+AZURE_CLIENT_ID=your_client_id
+AZURE_CLIENT_SECRET=your_client_secret
+AZURE_TENANT_ID=your_tenant_id
+REDIRECT_URI=http://localhost:5000/callback
+FLASK_SECRET=your_random_secret_key
+```
+
+### 5. Run the Flask app:
+```bash
+python app.py
+```
+
+### 6. Open your browser:
+Navigate to `http://localhost:5000`
+
+---
+
+## 🔐 Authentication Flow (Fully Automated)
+
+1. Click **"Connect Microsoft Account"** button
+2. You'll be redirected to Microsoft login page
+3. Grant permissions to the app
+4. You'll be redirected back to the dashboard automatically
+5. **No manual copy-paste needed!**
+
+---
+
+## ✨ Features Available:
+
+- **Dashboard**: View your profile information
+- **Emails**: Browse recent Outlook emails
+- **Files**: Access OneDrive files
+- **Logout**: Clear session and disconnect
+
+---
+
+## 🚀 Tech Stack
+
+- **Flask**: Backend web framework
+- **MSAL**: Microsoft Authentication Library
+- **Microsoft Graph API**: Access Microsoft 365 services
+- **Python 3.8+**: Core language
+
+---
+
+## 📝 Notes
+
+- All OAuth tokens are stored securely in Flask sessions
+- Tokens are automatically refreshed when needed
+- No user credentials or secrets are exposed to the browser
+- For production, use HTTPS and a proper secret management solution
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
+
+---
+
+## 📄 License
+
+MIT License - feel free to use this project for learning and development!
 - ✅ Education (B.Tech, M.Tech, MBA, PhD, etc.)
 - ✅ Raw Text Preview
 
