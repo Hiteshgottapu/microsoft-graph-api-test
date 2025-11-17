@@ -67,7 +67,7 @@ if st.session_state.authenticated:
     
     # Tab 1: User Profile
     with tab1:
-        st.header("User Profile")
+        st.header("User Profile, "📄 Resume Parser"])
         try:
             profile = st.session_state.graph.get_user_profile()
             
@@ -178,6 +178,102 @@ if st.session_state.authenticated:
                 st.info("No SharePoint sites found")
         except Exception as e:
             st.error(f"Error fetching sites: {str(e)}")
+
+                # Tab 5: Resume Parser
+    with tab5:
+        st.header("Resume Parser")
+        
+        from resume_parser import ResumeParser
+        parser = ResumeParser(st.session_state.graph)
+        
+        st.info("📄 Parse resumes from OneDrive or SharePoint to extract structured information")
+        
+        # Search query input
+        search_query = st.text_input("Search Query", value="resume", help="Enter search term to find resume files")
+        
+        if st.button("🔍 Search & Parse All Resumes"):
+            with st.spinner("Searching and parsing resumes..."):
+                try:
+                    parsed_resumes = parser.search_and_parse_all_resumes(search_query)
+                    
+                    if parsed_resumes:
+                        st.success(f"Found and parsed {len(parsed_resumes)} resume(s)!")
+                        
+                        for idx, resume in enumerate(parsed_resumes):
+                            if 'error' not in resume:
+                                with st.expander(f"📄 {resume.get('file_name', 'Resume')} - Click to view details"):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.write("**Name:**", resume.get('name', 'Not found'))
+                                        st.write("**Email:**", resume.get('email', 'Not found'))
+                                        st.write("**Phone:**", resume.get('phone', 'Not found'))
+                                        st.write("**Experience:**", resume.get('experience', 'Not specified'))
+                                    
+                                    with col2:
+                                        st.write("**Education:**")
+                                        education = resume.get('education', [])
+                                        if education:
+                                            for edu in education:
+                                                st.write(f"- {edu}")
+                                        else:
+                                            st.write("Not found")
+                                        
+                                        st.write(f"**Skills ({len(resume.get('skills', []))}):**")
+                                        skills = resume.get('skills', [])
+                                        if skills:
+                                            st.write(", ".join(skills[:10]))  # Show first 10 skills
+                                            if len(skills) > 10:
+                                                st.write(f"...and {len(skills) - 10} more")
+                                        else:
+                                            st.write("No skills detected")
+                                    
+                                    if st.checkbox(f"Show raw text preview", key=f"raw_{idx}"):
+                                        st.text_area("Text Preview", resume.get('raw_text_preview', ''), height=200)
+                            else:
+                                st.error(f"❌ Error parsing {resume.get('file_name')}: {resume.get('error')}")
+                    else:
+                        st.warning("No resume files found. Try a different search query.")
+                        
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+        
+        st.divider()
+        
+        # Manual file selection
+        st.subheader("📂 Parse Specific File")
+        
+        if st.button("💾 Load OneDrive Files"):
+            try:
+                files_response = st.session_state.graph.get_onedrive_root()
+                if 'value' in files_response:
+                    resume_files = [f for f in files_response['value'] 
+                                  if f.get('name', '').endswith(('.pdf', '.docx', '.doc'))]
+                    
+                    if resume_files:
+                        st.session_state.available_resumes = resume_files
+                        st.success(f"Found {len(resume_files)} resume file(s)")
+                    else:
+                        st.warning("No PDF or DOCX files found in OneDrive root")
+            except Exception as e:
+                st.error(f"Error loading files: {str(e)}")
+        
+        if 'available_resumes' in st.session_state and st.session_state.available_resumes:
+            file_names = [f['name'] for f in st.session_state.available_resumes]
+            selected_file = st.selectbox("Select a file to parse", file_names)
+            
+            if st.button("⚙️ Parse Selected File"):
+                file_item = next(f for f in st.session_state.available_resumes if f['name'] == selected_file)
+                
+                with st.spinner(f"Parsing {selected_file}..."):
+                    try:
+                        parsed_data = parser.parse_resume_from_onedrive(file_item['id'], selected_file)
+                        
+                        st.success("✅ Resume parsed successfully!")
+                        st.json(parsed_data)
+                        
+                    except Exception as e:
+                        st.error(f"Error parsing file: {str(e)}")
 
 else:
     # Show instructions when not authenticated
