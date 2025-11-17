@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Resume Parser{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h2 class="mb-4"><i class="fas fa-tachometer-alt me-2"></i>Resume Parser Dashboard</h2>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title"><i class="fas fa-search me-2"></i>Find Resume Files</h5>
+                    <p class="card-text">Search for resume files in your OneDrive and SharePoint</p>
+                    <button id="findResumesBtn" class="btn btn-primary">
+                        <i class="fas fa-search me-2"></i>Find Resumes
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title"><i class="fas fa-bolt me-2"></i>Batch Process</h5>
+                    <p class="card-text">Parse all resume files at once</p>
+                    <button id="parseAllBtn" class="btn btn-success" disabled>
+                        <i class="fas fa-play me-2"></i>Parse All Resumes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="text-center my-4" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Processing...</p>
+    </div>
+
+    <!-- Resume Files List -->
+    <div id="resumeFilesSection" style="display: none;">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>Resume Files Found: <span id="fileCount">0</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>File Name</th>
+                                        <th>Size</th>
+                                        <th>Modified</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resumeFilesList">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parsed Results -->
+    <div id="parsedResultsSection" class="mt-4" style="display: none;">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>Parsed Resume Data</h5>
+                    </div>
+                    <div class="card-body" id="parsedResults">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let resumeFiles = [];
+
+    // Find Resumes Button
+    document.getElementById('findResumesBtn').addEventListener('click', async function() {
+        showLoading();
+        hideSection('parsedResultsSection');
+        
+        try {
+            const response = await fetch('/api/resumes');
+            const data = await response.json();
+            
+            if (data.error) {
+                alert('Error: ' + data.error);
+                hideLoading();
+                return;
+            }
+            
+            resumeFiles = data.files || [];
+            displayResumeFiles(resumeFiles);
+            
+            // Enable parse all button if files found
+            document.getElementById('parseAllBtn').disabled = resumeFiles.length === 0;
+            
+        } catch (error) {
+            alert('Failed to fetch resumes: ' + error.message);
+        }
+        
+        hideLoading();
+    });
+
+    // Parse All Button
+    document.getElementById('parseAllBtn').addEventListener('click', async function() {
+        if (!confirm(`Parse all ${resumeFiles.length} resume files?`)) {
+            return;
+        }
+        
+        showLoading();
+        hideSection('parsedResultsSection');
+        
+        try {
+            const response = await fetch('/api/parse-all', {
+                method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                alert('Error: ' + data.error);
+                hideLoading();
+                return;
+            }
+            
+            displayParsedResults(data.results);
+            
+        } catch (error) {
+            alert('Failed to parse resumes: ' + error.message);
+        }
+        
+        hideLoading();
+    });
+
+    // Parse individual resume
+    async function parseResume(fileId, fileName) {
+        showLoading();
+        hideSection('parsedResultsSection');
+        
+        try {
+            const response = await fetch(`/api/parse/${fileId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ file_name: fileName })
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                alert('Error: ' + data.error);
+                hideLoading();
+                return;
+            }
+            
+            displayParsedResults([data]);
+            
+        } catch (error) {
+            alert('Failed to parse resume: ' + error.message);
+        }
+        
+        hideLoading();
+    }
+
+    // Display resume files in table
+    function displayResumeFiles(files) {
+        const tbody = document.getElementById('resumeFilesList');
+        tbody.innerHTML = '';
+        
+        document.getElementById('fileCount').textContent = files.length;
+        
+        if (files.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center">No resume files found</td></tr>';
+            showSection('resumeFilesSection');
+            return;
+        }
+        
+        files.forEach(file => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><i class="fas fa-file-pdf text-danger me-2"></i>${file.name}</td>
+                <td>${formatFileSize(file.size)}</td>
+                <td>${formatDate(file.lastModifiedDateTime)}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="parseResume('${file.id}', '${file.name}')">
+                        <i class="fas fa-play me-1"></i>Parse
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        showSection('resumeFilesSection');
+    }
+
+    // Display parsed results
+    function displayParsedResults(results) {
+        const container = document.getElementById('parsedResults');
+        container.innerHTML = '';
+        
+        results.forEach(result => {
+            const card = document.createElement('div');
+            card.className = 'mb-3 p-3 border rounded';
+            
+            card.innerHTML = `
+                <h6 class="mb-3"><i class="fas fa-file me-2"></i>${result.file_name}</h6>
+                ${result.error ? 
+                    `<div class="alert alert-danger">${result.error}</div>` :
+                    `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Name:</strong> ${result.data?.name || 'Not found'}</p>
+                            <p><strong>Email:</strong> ${result.data?.email || 'Not found'}</p>
+                            <p><strong>Phone:</strong> ${result.data?.phone || 'Not found'}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Skills:</strong></p>
+                            <div>
+                                ${result.data?.skills?.map(skill => 
+                                    `<span class="skill-tag">${skill}</span>`
+                                ).join('') || 'No skills found'}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <p><strong>Experience:</strong></p>
+                        <ul>
+                            ${result.data?.experience?.map(exp => 
+                                `<li>${exp}</li>`
+                            ).join('') || '<li>No experience found</li>'}
+                        </ul>
+                    </div>
+                    <div class="mt-3">
+                        <p><strong>Education:</strong></p>
+                        <ul>
+                            ${result.data?.education?.map(edu => 
+                                `<li>${edu}</li>`
+                            ).join('') || '<li>No education found</li>'}
+                        </ul>
+                    </div>
+                    `
+                }
+            `;
+            
+            container.appendChild(card);
+        });
+        
+        showSection('parsedResultsSection');
+    }
+
+    // Utility functions
+    function showLoading() {
+        document.getElementById('loadingSpinner').style.display = 'block';
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingSpinner').style.display = 'none';
+    }
+
+    function showSection(sectionId) {
+        document.getElementById(sectionId).style.display = 'block';
+    }
+
+    function hideSection(sectionId) {
+        document.getElementById(sectionId).style.display = 'none';
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    function formatDate(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    }
+</script>
+{% endblock %}
