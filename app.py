@@ -1,324 +1,245 @@
-"""Streamlit App for Microsoft Graph API Testing
+"""Flask App for Automated Microsoft Graph API OAuth
 
-Run with: streamlit run app.py
+Run with: python app.py
+Then visit: http://localhost:5000/login
 """
 
-import streamlit as st
-from microsoft_graph_api import MicrosoftGraphAPI
+from flask import Flask, session, redirect, request, url_for, jsonify
+import msal
+import requests
 import os
+from datetime import timedelta
 
-# Page config
-st.set_page_config(
-    page_title="Microsoft Graph API Test",
-    page_icon="📧",
-    layout="wide"
-)
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET", "CHANGE_ME_FOR_PRODUCTION")
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
-# Title
-st.title("📧 Microsoft Graph API - Outlook, OneDrive, SharePoint")
-st.markdown("---")
+# Azure AD Configuration
+CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "YOUR_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+TENANT_ID = os.environ.get("AZURE_TENANT_ID", "YOUR_TENANT_ID")
+REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SCOPE = [
+    "User.Read",
+    "Mail.Read",
+    "Files.Read.All",
+    "Sites.Read.All"
+]
 
-# Initialize session state
-if 'graph' not in st.session_state:
-    st.session_state.graph = MicrosoftGraphAPI()
+@app.route('/')
+def index():
+    if session.get('access_token'):
+        return '''<html>
+            <body style="font-family: Arial; padding: 50px; text-align: center;">
+                <h1>✅ Connected to Microsoft Graph API</h1>
+                <p>You are authenticated!</p>
+                <a href="/dashboard" style="padding: 10px 20px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px;">Go to Dashboard</a>
+                <br><br>
+                <a href="/logout" style="padding: 10px 20px; background: #d13438; color: white; text-decoration: none; border-radius: 5px;">Logout</a>
+            </body>
+        </html>'''
+    return '''<html>
+        <body style="font-family: Arial; padding: 50px; text-align: center;">
+            <h1>🔐 Microsoft Graph API OAuth Test</h1>
+            <p>Click below to connect your Microsoft account</p>
+            <a href="/login" style="padding: 15px 30px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px; font-size: 18px;">🔗 Connect Microsoft Account</a>
+        </body>
+    </html>'''
 
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+@app.route('/login')
+def login():
+    session.permanent = True
+    msal_app = msal.ConfidentialClientApplication(
+        CLIENT_ID, 
+        authority=AUTHORITY, 
+        client_credential=CLIENT_SECRET
+    )
+    flow = msal_app.initiate_auth_code_flow(SCOPE, redirect_uri=REDIRECT_URI)
+    session['auth_flow'] = flow
+    return redirect(flow['auth_uri'])
 
-# Sidebar for authentication
-with st.sidebar:
-    st.header("🔐 Authentication")
+@app.route('/callback')
+def callback():
+    try:
+        msal_app = msal.ConfidentialClientApplication(
+            CLIENT_ID, 
+            authority=AUTHORITY, 
+            client_credential=CLIENT_SECRET
+        )
+        result = msal_app.acquire_token_by_auth_code_flow(
+            session.get('auth_flow', {}), 
+            request.args
+        )
+        
+        if "access_token" in result:
+            session['access_token'] = result['access_token']
+            session['refresh_token'] = result.get('refresh_token', '')
+            return redirect(url_for('dashboard'))
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            error_desc = result.get('error_description', '')
+            return f'''<html>
+                <body style="font-family: Arial; padding: 50px; text-align: center;">
+                    <h1>❌ Authentication Error</h1>
+                    <p><strong>Error:</strong> {error_msg}</p>
+                    <p>{error_desc}</p>
+                    <a href="/">Go back</a>
+                </body>
+            </html>'''
+    except Exception as e:
+        return f'''<html>
+            <body style="font-family: Arial; padding: 50px; text-align: center;">
+                <h1>❌ Exception Occurred</h1>
+                <p>{str(e)}</p>
+                <a href="/">Go back</a>
+            </body>
+        </html>'''
+
+@app.route('/dashboard')
+def dashboard():
+    access_token = session.get('access_token')
+    if not access_token:
+        return redirect(url_for('login'))
     
-    if not st.session_state.authenticated:
-        st.write("**Step 1:** Click the button below to get the login URL")
-        
-        if st.button("🔗 Get Login URL"):
-            auth_url = st.session_state.graph.get_auth_url()
-            st.code(auth_url, language="text")
-            st.info("👆 Copy and open this URL in your browser to login")
-        
-        st.write("---")
-        st.write("**Step 2:** After login, paste the authorization code here:")
-        auth_code = st.text_input("Authorization Code", type="password")
-        
-        if st.button("✅ Authenticate"):
-            if auth_code:
-                try:
-                    with st.spinner("Authenticating..."):
-                        result = st.session_state.graph.get_token_from_code(auth_code)
-                        st.session_state.authenticated = True
-                        st.success("✅ Authentication successful!")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Authentication failed: {str(e)}")
-            else:
-                st.warning("Please enter the authorization code")
-    else:
-        st.success("✅ Authenticated")
-        if st.button("🚪 Logout"):
-            st.session_state.authenticated = False
-            st.session_state.graph.token = None
-            st.rerun()
-
-# Main content
-if st.session_state.authenticated:
-    # Create tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👤 Profile", "📧 Emails", "📁 OneDrive", "🏢 SharePoint", "📄 Resume Parser"])
+    headers = {"Authorization": f"Bearer {access_token}"}
     
-    # Tab 1: User Profile
-    with tab1:
-        st.header("User Profile")
-        try:
-            profile = st.session_state.graph.get_user_profile()
+    # Fetch user profile
+    try:
+        user_resp = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers)
+        user_data = user_resp.json()
+        
+        name = user_data.get('displayName', 'Unknown')
+        email = user_data.get('mail') or user_data.get('userPrincipalName', 'N/A')
+        
+        return f'''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>📊 Dashboard</h1>
+                <div style="background: #f3f2f1; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2>👤 Profile</h2>
+                    <p><strong>Name:</strong> {name}</p>
+                    <p><strong>Email:</strong> {email}</p>
+                </div>
+                <div style="margin: 20px 0;">
+                    <a href="/api/emails" style="padding: 10px 20px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px;">📧 View Emails</a>
+                    <a href="/api/files" style="padding: 10px 20px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px;">📁 View Files</a>
+                    <a href="/logout" style="padding: 10px 20px; background: #d13438; color: white; text-decoration: none; border-radius: 5px;">🚪 Logout</a>
+                </div>
+            </body>
+        </html>'''
+    except Exception as e:
+        return f'''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>❌ Error fetching profile</h1>
+                <p>{str(e)}</p>
+                <a href="/logout">Logout and retry</a>
+            </body>
+        </html>'''
+
+@app.route('/api/emails')
+def get_emails():
+    access_token = session.get('access_token')
+    if not access_token:
+        return redirect(url_for('login'))
+    
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    try:
+        emails_resp = requests.get(
+            "https://graph.microsoft.com/v1.0/me/messages?$top=10",
+            headers=headers
+        )
+        emails_data = emails_resp.json()
+        
+        html = '''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>📧 Recent Emails</h1>
+                <a href="/dashboard" style="padding: 10px 20px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px;">← Back to Dashboard</a>
+                <div style="margin-top: 20px;">
+        '''
+        
+        for email in emails_data.get('value', []):
+            subject = email.get('subject', 'No Subject')
+            sender = email.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')
+            received = email.get('receivedDateTime', '')
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Name", profile.get('displayName', 'N/A'))
-                st.metric("Email", profile.get('mail', 'N/A'))
-            with col2:
-                st.metric("Job Title", profile.get('jobTitle', 'N/A'))
-                st.metric("Office Location", profile.get('officeLocation', 'N/A'))
-                
-            with st.expander("📋 Full Profile Data"):
-                st.json(profile)
-        except Exception as e:
-            st.error(f"Error fetching profile: {str(e)}")
-    
-    # Tab 2: Emails
-    with tab2:
-        st.header("Outlook Emails")
+            html += f'''<div style="background: #f3f2f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Subject:</strong> {subject}</p>
+                <p><strong>From:</strong> {sender}</p>
+                <p><strong>Received:</strong> {received}</p>
+            </div>'''
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            email_count = st.slider("Number of emails to fetch", 5, 50, 10)
-        with col2:
-            if st.button("🔄 Refresh Emails"):
-                st.rerun()
-        
-        try:
-            emails = st.session_state.graph.get_emails(top=email_count)
-            
-            if emails and 'value' in emails:
-                st.success(f"Found {len(emails['value'])} emails")
-                
-                for i, email in enumerate(emails['value'], 1):
-                    with st.expander(f"📧 {i}. {email.get('subject', 'No Subject')}"):
-                        col_a, col_b = st.columns([2, 1])
-                        with col_a:
-                            st.write(f"**From:** {email['from']['emailAddress']['address']}")
-                        with col_b:
-                            st.write(f"**Date:** {email.get('receivedDateTime', 'N/A')}")
-                        
-                        st.write("**Preview:**")
-                        st.write(email.get('bodyPreview', 'No preview available'))
-                        
-                        if st.button(f"View Full Email #{i}", key=f"email_{i}"):
-                            st.json(email)
-            else:
-                st.info("No emails found")
-        except Exception as e:
-            st.error(f"Error fetching emails: {str(e)}")
-    
-    # Tab 3: OneDrive
-    with tab3:
-        st.header("OneDrive Files")
-        
-        if st.button("🔄 Refresh Files"):
-            st.rerun()
-        
-        try:
-            files = st.session_state.graph.get_onedrive_root()
-            
-            if files and 'value' in files:
-                st.success(f"Found {len(files['value'])} items")
-                
-                for file in files['value']:
-                    file_type = "📁" if 'folder' in file else "📄"
-                    file_name = file.get('name', 'Unnamed')
-                    file_size = file.get('size', 0)
-                    
-                    with st.expander(f"{file_type} {file_name}"):
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.write(f"**Size:** {file_size:,} bytes")
-                        with col_b:
-                            st.write(f"**Modified:** {file.get('lastModifiedDateTime', 'N/A')}")
-                        
-                        if st.button(f"View Details", key=f"file_{file['id']}"):
-                            st.json(file)
-            else:
-                st.info("No files found")
-        except Exception as e:
-            st.error(f"Error fetching files: {str(e)}")
-    
-    # Tab 4: SharePoint
-    with tab4:
-        st.header("SharePoint Sites")
-        
-        if st.button("🔄 Refresh Sites"):
-            st.rerun()
-        
-        try:
-            sites = st.session_state.graph.get_sharepoint_sites()
-            
-            if sites and 'value' in sites:
-                st.success(f"Found {len(sites['value'])} sites")
-                
-                for site in sites['value']:
-                    site_name = site.get('displayName', 'Unnamed Site')
-                    site_url = site.get('webUrl', 'N/A')
-                    
-                    with st.expander(f"🏢 {site_name}"):
-                        st.write(f"**URL:** {site_url}")
-                        st.write(f"**Description:** {site.get('description', 'No description')}")
-                        
-                        if st.button(f"View Site Details", key=f"site_{site['id']}"):
-                            st.json(site)
-            else:
-                st.info("No SharePoint sites found")
-        except Exception as e:
-            st.error(f"Error fetching sites: {str(e)}")
+        html += '</div></body></html>'
+        return html
+    except Exception as e:
+        return f'''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>❌ Error fetching emails</h1>
+                <p>{str(e)}</p>
+                <a href="/dashboard">Back to Dashboard</a>
+            </body>
+        </html>'''
 
-                # Tab 5: Resume Parser
-    with tab5:
-        st.header("Resume Parser")
+@app.route('/api/files')
+def get_files():
+    access_token = session.get('access_token')
+    if not access_token:
+        return redirect(url_for('login'))
+    
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    try:
+        files_resp = requests.get(
+            "https://graph.microsoft.com/v1.0/me/drive/root/children",
+            headers=headers
+        )
+        files_data = files_resp.json()
         
-        from resume_parser import ResumeParser
-        parser = ResumeParser(st.session_state.graph)
+        html = '''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>📁 OneDrive Files</h1>
+                <a href="/dashboard" style="padding: 10px 20px; background: #0078d4; color: white; text-decoration: none; border-radius: 5px;">← Back to Dashboard</a>
+                <div style="margin-top: 20px;">
+        '''
         
-        st.info("📄 Parse resumes from OneDrive or SharePoint to extract structured information")
-        
-        # Search query input
-        search_query = st.text_input("Search Query", value="resume", help="Enter search term to find resume files")
-        
-        if st.button("🔍 Search & Parse All Resumes"):
-            with st.spinner("Searching and parsing resumes..."):
-                try:
-                    parsed_resumes = parser.search_and_parse_all_resumes(search_query)
-                    
-                    if parsed_resumes:
-                        st.success(f"Found and parsed {len(parsed_resumes)} resume(s)!")
-                        
-                        for idx, resume in enumerate(parsed_resumes):
-                            if 'error' not in resume:
-                                with st.expander(f"📄 {resume.get('file_name', 'Resume')} - Click to view details"):
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        st.write("**Name:**", resume.get('name', 'Not found'))
-                                        st.write("**Email:**", resume.get('email', 'Not found'))
-                                        st.write("**Phone:**", resume.get('phone', 'Not found'))
-                                        st.write("**Experience:**", resume.get('experience', 'Not specified'))
-                                    
-                                    with col2:
-                                        st.write("**Education:**")
-                                        education = resume.get('education', [])
-                                        if education:
-                                            for edu in education:
-                                                st.write(f"- {edu}")
-                                        else:
-                                            st.write("Not found")
-                                        
-                                        st.write(f"**Skills ({len(resume.get('skills', []))}):**")
-                                        skills = resume.get('skills', [])
-                                        if skills:
-                                            st.write(", ".join(skills[:10]))  # Show first 10 skills
-                                            if len(skills) > 10:
-                                                st.write(f"...and {len(skills) - 10} more")
-                                        else:
-                                            st.write("No skills detected")
-                                    
-                                    if st.checkbox(f"Show raw text preview", key=f"raw_{idx}"):
-                                        st.text_area("Text Preview", resume.get('raw_text_preview', ''), height=200)
-                            else:
-                                st.error(f"❌ Error parsing {resume.get('file_name')}: {resume.get('error')}")
-                    else:
-                        st.warning("No resume files found. Try a different search query.")
-                        
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-        
-        st.divider()
-        
-        # Manual file selection
-        st.subheader("📂 Parse Specific File")
-        
-        if st.button("💾 Load OneDrive Files"):
-            try:
-                files_response = st.session_state.graph.get_onedrive_root()
-                if 'value' in files_response:
-                    resume_files = [f for f in files_response['value'] 
-                                  if f.get('name', '').endswith(('.pdf', '.docx', '.doc'))]
-                    
-                    if resume_files:
-                        st.session_state.available_resumes = resume_files
-                        st.success(f"Found {len(resume_files)} resume file(s)")
-                    else:
-                        st.warning("No PDF or DOCX files found in OneDrive root")
-            except Exception as e:
-                st.error(f"Error loading files: {str(e)}")
-        
-        if 'available_resumes' in st.session_state and st.session_state.available_resumes:
-            file_names = [f['name'] for f in st.session_state.available_resumes]
-            selected_file = st.selectbox("Select a file to parse", file_names)
+        for file in files_data.get('value', []):
+            name = file.get('name', 'Unknown')
+            size = file.get('size', 0)
+            file_type = 'Folder' if 'folder' in file else 'File'
             
-            if st.button("⚙️ Parse Selected File"):
-                file_item = next(f for f in st.session_state.available_resumes if f['name'] == selected_file)
-                
-                with st.spinner(f"Parsing {selected_file}..."):
-                    try:
-                        parsed_data = parser.parse_resume_from_onedrive(file_item['id'], selected_file)
-                        
-                        st.success("✅ Resume parsed successfully!")
-                        st.json(parsed_data)
-                        
-                    except Exception as e:
-                        st.error(f"Error parsing file: {str(e)}")
+            html += f'''<div style="background: #f3f2f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Name:</strong> {name}</p>
+                <p><strong>Type:</strong> {file_type}</p>
+                <p><strong>Size:</strong> {size} bytes</p>
+            </div>'''
+        
+        html += '</div></body></html>'
+        return html
+    except Exception as e:
+        return f'''<html>
+            <body style="font-family: Arial; padding: 50px;">
+                <h1>❌ Error fetching files</h1>
+                <p>{str(e)}</p>
+                <a href="/dashboard">Back to Dashboard</a>
+            </body>
+        </html>'''
 
-else:
-    # Show instructions when not authenticated
-    st.info("👈 Please authenticate using the sidebar to access Microsoft services")
-    
-    st.markdown("""    ### 📝 Setup Instructions:
-    
-    1. **Get your Azure credentials:**
-       - Client ID: `92149bb7-b052-4d4b-9d39-6cb1440716db`
-       - Tenant ID: `2224abd7-7085-434d-b50a-add325728a07`
-    
-    2. **Create a `.env` file** (optional):
-       ```
-       MICROSOFT_CLIENT_ID=your_client_id
-       MICROSOFT_CLIENT_SECRET=your_client_secret
-       MICROSOFT_TENANT_ID=your_tenant_id
-       MICROSOFT_REDIRECT_URI=http://localhost:8000/oauth/callback/microsoft
-       ```
-    
-    3. **Install dependencies:**
-       ```bash
-       pip install -r requirements.txt
-       ```
-    
-    4. **Run the app:**
-       ```bash
-       streamlit run app.py
-       ```
-    
-    ### 🔐 Authentication Flow:
-    
-    1. Click "Get Login URL" in the sidebar
-    2. Copy and open the URL in your browser
-    3. Login with your Microsoft account
-    4. Copy the authorization code from the redirect URL
-    5. Paste it in the sidebar and click "Authenticate"
-    
-    ### ✨ Features:
-    
-    - **Profile**: View your Microsoft account details
-    - **Emails**: Browse your Outlook inbox
-    - **OneDrive**: View your files and folders
-    - **SharePoint**: Access your SharePoint sites
-    """)
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
 
-# Footer
-st.markdown("---")
-st.caption("Built with Streamlit | Microsoft Graph API Integration")
+if __name__ == '__main__':
+    print("\n" + "="*60)
+    print("🚀 Microsoft Graph API OAuth Test Server")
+    print("="*60)
+    print("\n📝 Setup Instructions:")
+    print("1. Set environment variables:")
+    print("   - AZURE_CLIENT_ID")
+    print("   - AZURE_CLIENT_SECRET")
+    print("   - AZURE_TENANT_ID")
+    print("   - REDIRECT_URI (default: http://localhost:5000/callback)")
+    print("\n2. Make sure Azure redirect URI matches: http://localhost:5000/callback")
+    print("\n3. Visit: http://localhost:5000")
+    print("\n" + "="*60 + "\n")
+    app.run(debug=True, port=5000)
