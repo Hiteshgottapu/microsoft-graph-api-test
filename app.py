@@ -63,11 +63,11 @@ with st.sidebar:
 # Main content
 if st.session_state.authenticated:
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["👤 Profile", "📧 Emails", "📁 OneDrive", "🏢 SharePoint"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👤 Profile", "📧 Emails", "📁 OneDrive", "🏢 SharePoint", "📄 Resume Parser"])
     
     # Tab 1: User Profile
     with tab1:
-        st.header("User Profile, "📄 Resume Parser"])
+        st.header("User Profile")
         try:
             profile = st.session_state.graph.get_user_profile()
             
